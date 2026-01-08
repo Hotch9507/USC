@@ -6,7 +6,43 @@
 
 参考PowerShell和Kubernetes的命令设计哲学，提供一致、直观的命令结构。
 
-## 命令格式
+## 安装教程
+
+### 方法一：从源码安装
+
+```bash
+# 克隆仓库
+git clone https://github.com/Hotch9507/usc.git
+cd usc
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 安装
+pip install .
+```
+
+### 方法二：使用PyInstaller创建可执行文件
+
+```bash
+# 克隆仓库
+git clone https://github.com/Hotch9507/usc.git
+cd usc
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 安装PyInstaller
+pip install pyinstaller
+
+# 创建可执行文件
+pyinstaller --onefile --name usc --clean usc.py
+
+# 可执行文件位于 dist/usc
+```
+
+
+### 命令格式
 
 ```
 usc <module> <action>:<value> [parameter:value] [parameter:value] ...
