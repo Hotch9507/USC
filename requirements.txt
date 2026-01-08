@@ -1,0 +1,6 @@
+
+# USC - Unified Shell Command
+# 统一命令翻译兼容层依赖
+
+# TOML格式支持
+toml>=0.10.0
