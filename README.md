@@ -41,6 +41,42 @@ pyinstaller --onefile --name usc --clean usc.py
 # 可执行文件位于 dist/usc
 ```
 
+### 方法三：安装命令补全功能
+
+为了提高使用效率，建议安装USC的命令补全功能，它可以通过Tab键自动补全命令、模块和参数。
+
+```bash
+# 克隆仓库
+git clone https://github.com/Hotch9507/usc.git
+cd usc
+
+# 使用root权限安装补全
+sudo ./install_completion.sh
+```
+
+这将：
+1. 将补全脚本复制到 `/etc/bash_completion.d/` 目录
+2. 添加到 `/etc/profile` 确保所有用户都能使用
+3. 为当前用户立即激活补全功能
+
+如果您没有root权限，也可以进行用户级安装：
+
+```bash
+# 将补全脚本复制到用户目录
+mkdir -p ~/.config/usc
+cp usc-completion.bash ~/.config/usc/
+
+# 添加到~/.bashrc
+echo "source ~/.config/usc/usc-completion.bash" >> ~/.bashrc
+
+# 重新加载配置
+source ~/.bashrc
+```
+
+安装完成后，您可以使用Tab键进行命令补全：
+- `usc <Tab>` - 补全模块名
+- `usc user <Tab>` - 补全用户模块操作
+- `usc user add:chenxi <Tab>` - 补全参数
 
 ### 命令格式
 
