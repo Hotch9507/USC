@@ -4,7 +4,9 @@
 """
 
 from typing import Dict
+
 from .base import BaseModule
+
 
 class GroupModule(BaseModule):
     """用户组管理模块"""
@@ -29,7 +31,7 @@ class GroupModule(BaseModule):
 
         Args:
             groupname: 组名
-            params: 参数字典，可能包含 gid, system 等
+            params: 参数字典，可能包含 gid, user, chroot, system 等
 
         Returns:
             执行结果状态码
@@ -46,10 +48,50 @@ class GroupModule(BaseModule):
 
         # 添加GID参数
         if "gid" in params:
-            command.extend(["-g", params["gid"]])
+            gid = params["gid"]
+            command.extend(["-g", gid])
+
+            # 检查GID是否已存在
+            check_gid_cmd = ["getent", "group", gid]
+            check_result = self._run_command(check_gid_cmd, check=False, output_format="raw")
+            if check_result == 0 and check_result.stdout:
+                print(f"警告：GID {gid} 已被其他组使用")
 
         command.append(groupname)
-        return self._run_command(command)
+        result = self._run_command(command)
+
+        # 如果组创建成功，添加成员
+        if result == 0 and "user" in params:
+            users = params["user"].split(",")
+            for user in users:
+                user = user.strip()
+                if user:  # 跳过空字符串
+                    # 使用usermod将用户添加到组
+                    usermod_cmd = ["sudo", "usermod", "-aG", groupname, user]
+                    user_result = self._run_command(usermod_cmd, check=False)
+                    if user_result != 0:
+                        print(f"警告：无法将用户 {user} 添加到组 {groupname}")
+
+        # 处理chroot参数
+        if result == 0 and "chroot" in params:
+            chroot_dir = params["chroot"]
+            # 在chroot环境中创建组
+            chroot_cmd = ["sudo", "chroot", chroot_dir, "groupadd"]
+
+            # 系统组设置
+            if is_system:
+                chroot_cmd.append("-r")
+
+            # 添加GID参数
+            if "gid" in params:
+                chroot_cmd.extend(["-g", params["gid"]])
+
+            chroot_cmd.append(groupname)
+            chroot_result = self._run_command(chroot_cmd, check=False)
+            if chroot_result != 0:
+                print(f"警告：无法在chroot环境 {chroot_dir} 中创建组 {groupname}")
+
+        return result
 
     def _handle_del(self, groupname: str, params: Dict[str, str]) -> int:
         """
@@ -187,12 +229,17 @@ class GroupModule(BaseModule):
             "description": "添加新用户组",
             "parameters": {
                 "gid": "组ID（默认：系统自动分配）",
-                "system": "是否创建系统组，值为true/false（默认：false）"
+                "user": "创建组时指定组成员，多个用户用逗号分隔（默认：无）",
+                "chroot": "chroot到指定目录创建组（默认：无）",
+                "system": "是否创建为系统组，值为true/false（默认：false）"
             },
-            "usage": "usc group add:<groupname> gid:<gid> system:<true/false>",
+            "usage": "usc group add:<groupname> gid:<gid> user:<user1,user2,...> chroot:<path> system:<true/false>",
             "notes": [
                 "system:true时优先级最高，将强制设置gid为系统保留区间",
-                "未指定gid时，系统会自动分配一个可用的组ID"
+                "未指定gid时，系统会自动分配一个可用的组ID",
+                "如果指定的gid已被其他组使用，系统会显示警告但仍允许创建",
+                "user参数可以指定多个用户，用逗号分隔，这些用户将被添加到新创建的组中",
+                "chroot参数可以在指定的chroot环境中创建相同的组"
             ]
         }
 
