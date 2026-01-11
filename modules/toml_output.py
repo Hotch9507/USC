@@ -2,10 +2,13 @@
 TOML格式输出模块
 """
 
-import toml
-from typing import Dict, Any, List, Optional
+import datetime
 import json
 import logging
+import os
+from typing import Any, Dict
+
+import toml
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +41,13 @@ class TomlOutputMixin:
 
             # 输出TOML格式数据
             toml_str = toml.dumps(output_data)
-            print(toml_str)
+
+            # 如果设置了输出文件，则写入文件
+            if hasattr(self, 'output_file') and self.output_file:
+                self._write_to_file(toml_str)
+            else:
+                # 否则输出到控制台
+                print(toml_str)
 
             return 0
         except Exception as e:
@@ -68,7 +77,13 @@ class TomlOutputMixin:
 
             # 输出TOML格式错误信息
             toml_str = toml.dumps(error_data)
-            print(toml_str)
+
+            # 如果设置了输出文件，则写入文件
+            if hasattr(self, 'output_file') and self.output_file:
+                self._write_to_file(toml_str)
+            else:
+                # 否则输出到控制台
+                print(toml_str)
 
             return code
         except Exception as e:
@@ -165,3 +180,41 @@ class TomlOutputMixin:
                 data[key.strip()] = value.strip()
 
         return data
+
+    def _set_output_file(self, output_file: str):
+        """
+        设置输出文件路径
+
+        Args:
+            output_file: 输出文件路径
+        """
+        # 确保目录存在
+        dir_path = os.path.dirname(output_file)
+        if dir_path and not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+
+        self.output_file = output_file
+
+    def _write_to_file(self, content: str):
+        """
+        将内容写入输出文件
+
+        Args:
+            content: 要写入的内容
+        """
+        try:
+            with open(self.output_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            print(f"输出已保存到: {self.output_file}")
+        except Exception as e:
+            logger.error(f"写入文件失败: {e}")
+            print(f"错误：无法写入文件 {self.output_file}: {e}")
+
+    def _get_timestamp(self) -> str:
+        """
+        获取当前时间戳
+
+        Returns:
+            格式化的时间字符串
+        """
+        return datetime.datetime.now().strftime("%Y%m%d%H%M%S")

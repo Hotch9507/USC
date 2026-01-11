@@ -3,7 +3,9 @@
 """
 
 from typing import Dict
+
 from .base import BaseModule
+
 
 class UserModule(BaseModule):
     """用户管理模块"""
@@ -240,7 +242,7 @@ class UserModule(BaseModule):
         列出用户
 
         Args:
-            value: 用户类型，可以是login（可登录用户）、nologin（不可登录用户），默认为login
+            value: 用户类型，可以是login（可登录用户）、nologin（不可登录用户）、all（全部用户），默认为login
             params: 参数字典
 
         Returns:
@@ -266,23 +268,93 @@ class UserModule(BaseModule):
                 continue
 
             username = parts[0]
+            uid = parts[2]
+            gid = parts[3]
+            comment = parts[4]
+            home = parts[5]
             shell = parts[6]
 
             # 判断用户是否可以登录
             can_login = not (shell.endswith('/nologin') or shell.endswith('/false') or shell.endswith('/sync'))
 
+            # 判断是否为系统用户 (UID < 1000 通常认为是系统用户)
+            is_system = "否"
+            try:
+                if int(uid) < 1000:
+                    is_system = "是"
+            except ValueError:
+                pass
+
             # 根据用户类型过滤
             if user_type == "login" and can_login:
-                users.append(username)
+                users.append({
+                    "username": username,
+                    "uid": uid,
+                    "gid": gid,
+                    "comment": comment,
+                    "home": home,
+                    "shell": shell,
+                    "can_login": "是",
+                    "is_system": is_system
+                })
             elif user_type == "nologin" and not can_login:
-                users.append(username)
+                users.append({
+                    "username": username,
+                    "uid": uid,
+                    "gid": gid,
+                    "comment": comment,
+                    "home": home,
+                    "shell": shell,
+                    "can_login": "否",
+                    "is_system": is_system
+                })
+            elif user_type == "all":
+                users.append({
+                    "username": username,
+                    "uid": uid,
+                    "gid": gid,
+                    "comment": comment,
+                    "home": home,
+                    "shell": shell,
+                    "can_login": "是" if can_login else "否",
+                    "is_system": is_system
+                })
 
-        # 输出用户列表
+        # 美化输出用户列表
         if users:
-            for user in sorted(users):
-                print(user)
+            # 按用户名排序
+            users.sort(key=lambda x: x["username"])
+
+            # 计算各列最大宽度
+            max_username = max(len(user["username"]) for user in users)
+            max_uid = max(len(user["uid"]) for user in users)
+            max_gid = max(len(user["gid"]) for user in users)
+            max_comment = max(len(user["comment"]) for user in users)
+            max_home = max(len(user["home"]) for user in users)
+
+            # 输出表头
+            header = f"{'用户名':<{max_username}} {'UID':<{max_uid}} {'GID':<{max_gid}} {'注释':<{max_comment}} {'主目录':<{max_home}} {'Shell':<15} {'可登录':<6} {'系统用户':<6}"
+            print(header)
+            print("-" * len(header))
+
+            # 输出用户信息
+            for user in users:
+                print(f"{user['username']:<{max_username}} {user['uid']:<{max_uid}} {user['gid']:<{max_gid}} {user['comment']:<{max_comment}} {user['home']:<{max_home}} {user['shell']:<15} {user['can_login']:<6} {user['is_system']:<6}")
+
+            # 输出统计信息
+            type_desc = {
+                "login": "可登录",
+                "nologin": "不可登录",
+                "all": "全部"
+            }
+            print(f"\n共找到 {len(users)} 个{type_desc.get(user_type, '')}用户")
         else:
-            print(f"没有找到{'可登录' if user_type == 'login' else '不可登录'}的用户")
+            type_desc = {
+                "login": "可登录",
+                "nologin": "不可登录",
+                "all": ""
+            }
+            print(f"没有找到{type_desc.get(user_type, '')}用户")
 
         return 0
 
@@ -499,12 +571,18 @@ class UserModule(BaseModule):
             "action": "list",
             "description": "列出用户",
             "parameters": {
-                "value": "用户类型，可以是login（可登录用户，默认）或nologin（不可登录用户）"
+                "value": "用户类型，可以是login（可登录用户，默认）、nologin（不可登录用户）或all（全部用户）",
+                "out": "输出文件路径，可以是目录路径或完整文件路径（默认输出到控制台）"
             },
-            "usage": "usc user list:<login|nologin>",
+            "usage": "usc user list:<login|nologin|all> out:<path>",
             "notes": [
                 "login: 列出可以登录系统的用户（Shell不是nologin、false或sync）",
                 "nologin: 列出不能登录系统的用户（Shell是nologin、false或sync）",
-                "如果不指定参数，默认列出可登录用户"
+                "all: 列出所有用户，包括可登录和不可登录用户",
+                "如果不指定参数，默认列出可登录用户",
+                "输出以表格形式显示，包含用户名、UID、GID、注释、主目录、Shell、可登录状态和系统用户标识",
+                "使用out参数可将输出保存到TOML格式的文件中",
+                "out:/path/to/dir - 输出到指定目录，文件名自动生成为usc-时间戳.toml",
+                "out:/path/to/file.toml - 输出到指定文件"
             ]
         }

@@ -3,10 +3,11 @@ USC基础模块类
 所有具体模块都应继承此类
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
-import subprocess
 import logging
+import subprocess
+from abc import ABC, abstractmethod
+from typing import Dict, List
+
 from .toml_output import TomlOutputMixin
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ class BaseModule(ABC, TomlOutputMixin):
         self.description = ""
         self.actions = {}
         self.output_format = "toml"  # 默认输出格式为TOML
+        self.output_file = None  # 输出文件路径
 
     @abstractmethod
     def get_description(self) -> str:
@@ -42,6 +44,31 @@ class BaseModule(ABC, TomlOutputMixin):
         Returns:
             执行结果状态码，0表示成功，非0表示失败
         """
+        # 检查out参数
+        output_file = None
+        if "out" in params:
+            out_param = params["out"]
+            if not out_param:
+                print("错误：out参数不能为空")
+                return 1
+
+            # 处理out参数
+            if out_param.startswith("/") or out_param.startswith("./"):
+                # 绝对路径或相对路径
+                if out_param.endswith(".toml"):
+                    output_file = out_param
+                else:
+                    output_file = f"{out_param}/usc-{self._get_timestamp()}.toml"
+            else:
+                # 相对路径或文件名
+                if out_param.endswith(".toml"):
+                    output_file = out_param
+                else:
+                    output_file = f"{out_param}/usc-{self._get_timestamp()}.toml"
+
+            # 设置输出文件
+            self._set_output_file(output_file)
+
         if action not in self.get_actions():
             print(f"错误：未知操作 '{action}'")
             self.show_help()
@@ -124,3 +151,13 @@ class BaseModule(ABC, TomlOutputMixin):
             else:
                 print(f"执行命令时发生错误: {e}")
                 return 1
+
+    def _get_timestamp(self) -> str:
+        """
+        获取当前时间戳
+
+        Returns:
+            格式化的时间字符串
+        """
+        import datetime
+        return datetime.datetime.now().strftime("%Y%m%d%H%M%S")

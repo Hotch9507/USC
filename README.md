@@ -17,18 +17,41 @@
 
 ## 安装教程
 
-### 方法一：从源码安装
+### 方法一：使用安装脚本（推荐）
+
+使用安装脚本可以自动检查系统依赖并安装USC：
 
 ```bash
 # 克隆仓库
 git clone https://github.com/Hotch9507/usc.git
 cd usc
 
+# 运行安装脚本
+chmod +x install.sh
+./install.sh
+```
+
+安装脚本会：
+1. 检查Python版本（需要3.6+）
+2. 检查系统命令依赖
+3. 如果发现缺失的依赖，会显示安装建议
+4. 安装Python依赖和USC
+
+### 方法二：从源码安装
+
+```bash
+# 克隆仓库
+git clone https://github.com/Hotch9507/usc.git
+cd usc
+
+# 检查系统依赖
+python3 check_dependencies.py
+
 # 安装依赖
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # 安装
-pip install .
+python3 setup.py install
 ```
 
 ### 方法二：使用PyInstaller创建可执行文件
@@ -148,6 +171,70 @@ USC提供了完善的帮助系统，方便用户查询模块和操作的使用�
    ```
 
 帮助信息以TOML格式输出，便于其他工具解析和处理。
+
+## 卸载USC
+
+### 方法一：使用卸载脚本（推荐）
+
+```bash
+# 克隆仓库（如果尚未下载）
+git clone https://github.com/Hotch9507/usc.git
+cd usc
+
+# 运行卸载脚本
+chmod +x uninstall.sh
+sudo ./uninstall.sh
+```
+
+卸载脚本会：
+1. 查找并删除USC可执行文件和Python模块
+2. 询问是否删除配置文件
+3. 询问是否删除命令补全文件
+
+### 方法二：使用Python卸载工具
+
+```bash
+# 克隆仓库（如果尚未下载）
+git clone https://github.com/Hotch9507/usc.git
+cd usc
+
+# 运行Python卸载工具
+sudo python3 uninstall.py
+```
+
+### 方法三：手动卸载
+
+```bash
+# 使用pip卸载
+pip3 uninstall usc
+
+# 或者手动删除
+sudo rm -f $(which usc)
+sudo rm -rf $(python3 -c "import usc; print(usc.__file__)" | sed 's|/__init__.py||')
+```
+
+## 系统依赖
+
+USC依赖于一系列Linux系统命令，按功能分类如下：
+
+- **基础命令**: which, sudo, grep, awk, sort, tail, echo, cat, column
+- **系统信息**: uname, uptime, free, df, lscpu, ip
+- **用户管理**: useradd, usermod, userdel, passwd, chage, getent, id
+- **进程管理**: ps, kill, pgrep, pstree, renice, prlimit
+- **磁盘管理**: lsblk, fdisk, parted, mkfs.*, mount, umount, fsck, blkid, tune2fs
+- **网络管理**: ip, ss, ping, netstat, nc, iptables, dig, resolvconf, nsupdate, nmap
+- **服务管理**: systemctl, service, chkconfig
+- **防火墙管理**: firewall-cmd, ufw, iptables
+- **日志管理**: journalctl
+- **定时任务**: crontab
+- **包管理**: dnf, yum, apt, apt-get, zypper, pacman, dpkg, apt-cache
+- **系统关机**: shutdown, reboot, halt, poweroff
+
+在安装前，可以使用以下命令检查依赖：
+
+```bash
+python3 check_dependencies.py
+```
 
 ## 模块设计
 
