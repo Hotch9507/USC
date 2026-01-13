@@ -53,8 +53,8 @@ class GroupModule(BaseModule):
 
             # 检查GID是否已存在
             check_gid_cmd = ["getent", "group", gid]
-            check_result = self._run_command(check_gid_cmd, check=False, output_format="raw")
-            if check_result == 0 and check_result.stdout:
+            check_result = self._run_command_capture(check_gid_cmd, check=False)
+            if check_result.returncode == 0 and check_result.stdout:
                 print(f"警告：GID {gid} 已被其他组使用")
 
         command.append(groupname)
@@ -111,9 +111,9 @@ class GroupModule(BaseModule):
         if groupname.isdigit():
             # 使用GID获取组名
             gid_cmd = ["getent", "group", groupname]
-            gid_result = self._run_command(gid_cmd, check=False, output_format="raw")
+            gid_result = self._run_command_capture(gid_cmd, check=False)
 
-            if gid_result != 0 or not gid_result.stdout:
+            if gid_result.returncode != 0 or not gid_result.stdout:
                 print(f"错误：找不到GID为 {groupname} 的组")
                 return 1
 
@@ -124,9 +124,9 @@ class GroupModule(BaseModule):
         if is_force:
             # 获取组信息
             group_info_cmd = ["getent", "group", groupname]
-            group_info_result = self._run_command(group_info_cmd, check=False, output_format="raw")
+            group_info_result = self._run_command_capture(group_info_cmd, check=False)
 
-            if group_info_result == 0 and group_info_result.stdout:
+            if group_info_result.returncode == 0 and group_info_result.stdout:
                 # 解析组信息
                 group_info = group_info_result.stdout.strip().split(":")
                 if len(group_info) >= 4:
@@ -136,9 +136,9 @@ class GroupModule(BaseModule):
                     # 检查是否存在users组（GID为100）
                     users_group_exists = False
                     users_gid_check = ["getent", "group", "100"]
-                    users_gid_result = self._run_command(users_gid_check, check=False, output_format="raw")
+                    users_gid_result = self._run_command_capture(users_gid_check, check=False)
 
-                    if users_gid_result == 0 and users_gid_result.stdout:
+                    if users_gid_result.returncode == 0 and users_gid_result.stdout:
                         users_group_exists = True
 
                     # 如果不存在users组，则创建
@@ -155,9 +155,9 @@ class GroupModule(BaseModule):
 
                         # 获取用户信息
                         user_info_cmd = ["getent", "passwd", user]
-                        user_info_result = self._run_command(user_info_cmd, check=False, output_format="raw")
+                        user_info_result = self._run_command_capture(user_info_cmd, check=False)
 
-                        if user_info_result == 0 and user_info_result.stdout:
+                        if user_info_result.returncode == 0 and user_info_result.stdout:
                             user_info = user_info_result.stdout.strip().split(":")
                             if len(user_info) >= 4:
                                 user_gid = user_info[3]
@@ -179,9 +179,9 @@ class GroupModule(BaseModule):
             # 如果groupname是数字，则视为GID，需要先获取组名
             if groupname.isdigit():
                 chroot_gid_cmd = ["sudo", "chroot", chroot_dir, "getent", "group", groupname]
-                chroot_gid_result = self._run_command(chroot_gid_cmd, check=False, output_format="raw")
+                chroot_gid_result = self._run_command_capture(chroot_gid_cmd, check=False)
 
-                if chroot_gid_result == 0 and chroot_gid_result.stdout:
+                if chroot_gid_result.returncode == 0 and chroot_gid_result.stdout:
                     groupname = chroot_gid_result.stdout.strip().split(":")[0]
 
             chroot_cmd.append(groupname)
@@ -208,9 +208,9 @@ class GroupModule(BaseModule):
         if groupname.isdigit():
             # 使用GID获取组名
             gid_cmd = ["getent", "group", groupname]
-            gid_result = self._run_command(gid_cmd, check=False, output_format="raw")
+            gid_result = self._run_command_capture(gid_cmd, check=False)
 
-            if gid_result != 0 or not gid_result.stdout:
+            if gid_result.returncode != 0 or not gid_result.stdout:
                 print(f"错误：找不到GID为 {groupname} 的组")
                 return 1
 
@@ -218,6 +218,7 @@ class GroupModule(BaseModule):
             groupname = gid_result.stdout.strip().split(":")[0]
 
         # 修改组名和GID
+        result = 0  # 初始化返回值
         if "name" in params or "gid" in params:
             # 构建groupmod命令
             command = ["sudo", "groupmod"]
@@ -247,9 +248,9 @@ class GroupModule(BaseModule):
 
             # 获取当前组成员
             get_members_cmd = ["getent", "group", groupname]
-            get_members_result = self._run_command(get_members_cmd, check=False, output_format="raw")
+            get_members_result = self._run_command_capture(get_members_cmd, check=False)
 
-            if get_members_result != 0 or not get_members_result.stdout:
+            if get_members_result.returncode != 0 or not get_members_result.stdout:
                 print(f"错误：无法获取组 '{groupname}' 的信息")
                 return 1
 
@@ -275,11 +276,14 @@ class GroupModule(BaseModule):
                         print(f"警告：无法从组 '{groupname}' 中移除用户 '{member}'")
 
                 # 添加新成员
+                add_result = result  # 跟踪最后一个命令的返回值
                 for member in new_members:
                     add_cmd = ["sudo", "usermod", "-aG", groupname, member]
                     add_result = self._run_command(add_cmd, check=False)
                     if add_result != 0:
                         print(f"警告：无法将用户 '{member}' 添加到组 '{groupname}'")
+                if "name" not in params and "gid" not in params:
+                    result = add_result
             else:
                 # 增删模式：解析要添加和删除的用户
                 users_to_add = []
@@ -297,11 +301,14 @@ class GroupModule(BaseModule):
                     else:
                         print(f"警告：忽略无效的用户规范 '{user_spec}'，请使用 +用户名 或 -用户名 格式")
 
+                final_result = result
+
                 # 移除指定用户
                 for member in users_to_remove:
                     if member in current_members:
                         remove_cmd = ["sudo", "gpasswd", "-d", member, groupname]
                         remove_result = self._run_command(remove_cmd, check=False)
+                        final_result = remove_result
                         if remove_result != 0:
                             print(f"警告：无法从组 '{groupname}' 中移除用户 '{member}'")
                     else:
@@ -312,12 +319,16 @@ class GroupModule(BaseModule):
                     if member not in current_members:
                         add_cmd = ["sudo", "usermod", "-aG", groupname, member]
                         add_result = self._run_command(add_cmd, check=False)
+                        final_result = add_result
                         if add_result != 0:
                             print(f"警告：无法将用户 '{member}' 添加到组 '{groupname}'")
                     else:
                         print(f"注意：用户 '{member}' 已在组 '{groupname}' 中")
 
-        return 0
+                if "name" not in params and "gid" not in params:
+                    result = final_result
+
+        return result
 
     def _handle_list(self, value: str, params: Dict[str, str]) -> int:
         """
@@ -344,14 +355,14 @@ class GroupModule(BaseModule):
 
         # 使用getent命令列出用户组
         command = ["getent", "group"]
-        result = self._run_command(command, check=False, output_format="raw")
+        result = self._run_command_capture(command, check=False)
 
-        if result != 0:
-            return result
+        if result.returncode != 0:
+            return result.returncode
 
         # 解析组信息
         groups = []
-        for line in result.stdout.strip().split(''):
+        for line in result.stdout.strip().split('\n'):
             if not line:
                 continue
             parts = line.split(':')
@@ -427,9 +438,9 @@ class GroupModule(BaseModule):
         """
         # 获取组基本信息
         group_cmd = ["getent", "group", groupname]
-        group_result = self._run_command(group_cmd, check=False, output_format="raw")
+        group_result = self._run_command_capture(group_cmd, check=False)
 
-        if group_result != 0:
+        if group_result.returncode != 0:
             print(f"错误：找不到组 '{groupname}'")
             return 1
 
@@ -535,7 +546,7 @@ class GroupModule(BaseModule):
             ]
         }
 
-    def _help_list(self) -> Dict:
+    def _help_list(self) -> Dict[str, str]:
         """列出组操作的帮助信息"""
         return {
             "module": "group",

@@ -152,6 +152,46 @@ class BaseModule(ABC, TomlOutputMixin):
                 print(f"执行命令时发生错误: {e}")
                 return 1
 
+    def _run_command_capture(self, command: List[str], check: bool = True):
+        """
+        执行系统命令并捕获输出
+
+        Args:
+            command: 要执行的命令列表
+            check: 是否检查返回码
+
+        Returns:
+            包含 returncode, stdout, stderr 的对象
+        """
+        try:
+            logger.debug(f"执行命令: {' '.join(command)}")
+            result = subprocess.run(
+                command,
+                check=check,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            return result
+        except subprocess.CalledProcessError as e:
+            # 返回异常结果，但仍然包含输出信息
+            return e
+        except FileNotFoundError:
+            # 返回一个模拟的结果对象
+            class NotFoundResult:
+                def __init__(self):
+                    self.returncode = 1
+                    self.stdout = ""
+                    self.stderr = f"找不到命令 '{command[0]}'"
+            return NotFoundResult()
+        except Exception as e:
+            class ErrorResult:
+                def __init__(self, msg):
+                    self.returncode = 1
+                    self.stdout = ""
+                    self.stderr = str(msg)
+            return ErrorResult(e)
+
     def _get_timestamp(self) -> str:
         """
         获取当前时间戳
