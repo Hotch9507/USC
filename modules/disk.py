@@ -3,7 +3,9 @@
 """
 
 from typing import Dict
+
 from .base import BaseModule
+
 
 class DiskModule(BaseModule):
     """磁盘管理模块"""
@@ -25,6 +27,26 @@ class DiskModule(BaseModule):
             "usage": "显示磁盘使用情况",
             "uuid": "管理文件系统UUID"
         }
+
+    def get_boolean_params(self, action: str = None) -> Dict[str, List[str]]:
+        """
+        获取布尔参数列表
+
+        Returns:
+            布尔参数字典，格式为 {action: [param1, param2, ...]}
+        """
+        boolean_params = {
+            "list": ["detail"],
+            "info": [],
+            "format": ["force"],
+            "mount": [],
+            "unmount": ["force", "lazy"],
+            "partition": [],
+            "fsck": ["force", "auto_repair", "no_repair"],
+            "usage": ["human_readable", "inode"],
+            "uuid": []
+        }
+        return boolean_params
 
     def _handle_list(self, item: str, params: Dict[str, str]) -> int:
         """

@@ -3,8 +3,10 @@
 """
 
 from typing import Dict
+
 from .base import BaseModule
 from .distro_adapter import DistroAdapter
+
 
 class ServiceModule(BaseModule):
     """服务管理模块"""
@@ -30,6 +32,26 @@ class ServiceModule(BaseModule):
             "mask": "屏蔽服务",
             "unmask": "取消屏蔽服务"
         }
+
+    def get_boolean_params(self, action: str = None) -> Dict[str, List[str]]:
+        """
+        获取布尔参数列表
+
+        Returns:
+            布尔参数字典，格式为 {action: [param1, param2, ...]}
+        """
+        boolean_params = {
+            "list": ["detail"],
+            "start": [],
+            "stop": [],
+            "restart": [],
+            "status": [],
+            "enable": ["now"],
+            "disable": ["now"],
+            "mask": [],
+            "unmask": []
+        }
+        return boolean_params
 
     def _handle_list(self, value: str, params: Dict[str, str]) -> int:
         """

@@ -5,11 +5,10 @@ USC - Unified Shell Command
 """
 
 import sys
-import argparse
-from typing import Dict, List, Optional, Any
+from typing import Dict, List
 
 # 导入所有模块
-from modules import user, file, network, system, process, service, disk, package, group
+from modules import config, disk, file, group, network, package, process, service, system, user
 
 # 模块映射表
 MODULE_MAP = {
@@ -22,6 +21,7 @@ MODULE_MAP = {
     'disk': disk.DiskModule,
     'package': package.PackageModule,
     'group': group.GroupModule,
+    'config': config.ConfigModule,
 }
 
 class USC:
@@ -97,7 +97,7 @@ class USC:
         # 解析操作和参数
         try:
             action, value = self._parse_action(args[1])
-            params = self._parse_params(args[2:])
+            params = self._parse_params(args[2:], module, action)
             return module.execute(action, value, params)
         except Exception as e:
             print(f"错误：{e}")
@@ -122,26 +122,38 @@ class USC:
 
         return action, value
 
-    def _parse_params(self, param_list: List[str]) -> Dict[str, str]:
+    def _parse_params(self, param_list: List[str], module, action: str) -> Dict[str, str]:
         """
         解析参数列表
 
         Args:
-            param_list: 参数列表，每个元素格式为 "param:value"
+            param_list: 参数列表，每个元素格式为 "param:value" 或 "param"（布尔参数默认为true）
+            module: 模块对象，用于获取布尔参数列表
+            action: 操作名称
 
         Returns:
             参数字典
         """
+        # 获取该操作的布尔参数列表
+        boolean_params_dict = module.get_boolean_params(action)
+        boolean_params = boolean_params_dict.get(action, [])
+
         params = {}
         for param in param_list:
             if ':' not in param:
-                raise ValueError(f"参数格式错误: '{param}'，应为 'param:value'")
+                # 没有冒号，检查是否是布尔参数
+                if param in boolean_params:
+                    # 布尔参数，默认为true
+                    params[param] = "true"
+                else:
+                    raise ValueError(f"参数格式错误: '{param}'，应为 'param:value' (布尔参数可以省略值，默认为true)")
+            else:
+                # 有冒号，正常解析
+                key, value = param.split(':', 1)
+                if not key:
+                    raise ValueError(f"参数名不能为空: '{param}'")
 
-            key, value = param.split(':', 1)
-            if not key:
-                raise ValueError(f"参数名不能为空: '{param}'")
-
-            params[key] = value
+                params[key] = value
 
         return params
 

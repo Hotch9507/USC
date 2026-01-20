@@ -4,9 +4,12 @@ USC基础模块类
 """
 
 import logging
+import os
 import subprocess
 from abc import ABC, abstractmethod
-from typing import Dict, List
+from typing import Any, Dict, List
+
+import toml
 
 from .toml_output import TomlOutputMixin
 
@@ -21,6 +24,8 @@ class BaseModule(ABC, TomlOutputMixin):
         self.actions = {}
         self.output_format = "toml"  # 默认输出格式为TOML
         self.output_file = None  # 输出文件路径
+        self.config = {}  # 模块配置
+        self._load_config()  # 加载配置文件
 
     @abstractmethod
     def get_description(self) -> str:
@@ -31,6 +36,18 @@ class BaseModule(ABC, TomlOutputMixin):
     def get_actions(self) -> Dict[str, str]:
         """获取模块支持的操作及其描述"""
         pass
+
+    def get_boolean_params(self, action: str = None) -> Dict[str, List[str]]:
+        """
+        获取布尔参数列表
+
+        Args:
+            action: 操作名称，如果提供则返回该操作的布尔参数，否则返回所有操作的布尔参数
+
+        Returns:
+            布尔参数字典，格式为 {action: [param1, param2, ...]}
+        """
+        return {}
 
     def execute(self, action: str, value: str, params: Dict[str, str]) -> int:
         """
@@ -201,3 +218,119 @@ class BaseModule(ABC, TomlOutputMixin):
         """
         import datetime
         return datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+
+    def _load_config(self):
+        """
+        加载模块配置文件
+        从 /etc/usc/{模块名}.toml 加载配置
+        """
+        config_path = f"/etc/usc/{self.name}.toml"
+        self.config = {}
+
+        try:
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    self.config = toml.load(f)
+                logger.debug(f"已加载配置文件: {config_path}")
+            else:
+                logger.warning(f"配置文件不存在: {config_path}，使用代码默认值")
+        except PermissionError:
+            logger.error(f"无法读取配置文件 {config_path} (权限拒绝)")
+            print(f"警告：无法读取配置文件 {config_path} (权限拒绝)")
+        except toml.TomlDecodeError as e:
+            logger.error(f"配置文件格式错误 {config_path}: {e}")
+            print(f"警告：配置文件格式错误: {e}，使用代码默认值")
+        except Exception as e:
+            logger.error(f"加载配置文件失败 {config_path}: {e}")
+            print(f"警告：加载配置文件失败: {e}，使用代码默认值")
+
+    def _get_param_value(self, key: str, action: str = None,
+                         params: Dict[str, str] = None, fallback: Any = None) -> Any:
+        """
+        获取参数值，实现三层优先级
+        优先级: 命令行参数 > 操作级配置 > 全局配置 > 代码默认值
+
+        Args:
+            key: 参数名
+            action: 操作名
+            params: 命令行参数字典
+            fallback: 代码默认值
+
+        Returns:
+            参数值
+        """
+        # 第一优先级：命令行参数
+        if params and key in params:
+            return params[key]
+
+        # 第二优先级：操作级配置
+        if action:
+            action_config = self.config.get('default', {}).get(action, {})
+            if key in action_config:
+                return action_config[key]
+
+        # 第三优先级：全局配置
+        global_config = self.config.get('default', {})
+        if key in global_config and not isinstance(global_config[key], dict):
+            return global_config[key]
+
+        # 第四优先级：代码默认值
+        return fallback
+
+    def _get_action_config(self, action: str) -> Dict[str, Any]:
+        """
+        获取特定操作的配置
+        合并全局配置和操作级配置
+
+        Args:
+            action: 操作名
+
+        Returns:
+            合并后的配置字典
+        """
+        global_config = self.config.get('default', {})
+        action_config = global_config.get(action, {}).copy()
+
+        # 移除嵌套的配置节，只保留参数
+        result = {}
+        for key, value in action_config.items():
+            if not isinstance(value, dict):
+                result[key] = value
+
+        return result
+
+    def _convert_bool(self, value: Any, default: bool = False) -> bool:
+        """
+        转换布尔值
+
+        Args:
+            value: 要转换的值
+            default: 默认值
+
+        Returns:
+            布尔值
+        """
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in ("true", "yes", "1", "on")
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return default
+
+    def _convert_list(self, value: Any, separator: str = ",") -> List[str]:
+        """
+        转换列表值
+
+        Args:
+            value: 要转换的值
+            separator: 分隔符
+
+        Returns:
+            列表
+        """
+        if isinstance(value, list):
+            return [str(v).strip() for v in value]
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(separator) if item.strip()]
+        return []

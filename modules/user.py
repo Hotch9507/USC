@@ -24,6 +24,22 @@ class UserModule(BaseModule):
             "info": "显示用户详细信息"
         }
 
+    def get_boolean_params(self, action: str = None) -> Dict[str, List[str]]:
+        """
+        获取布尔参数列表
+
+        Returns:
+            布尔参数字典，格式为 {action: [param1, param2, ...]}
+        """
+        boolean_params = {
+            "add": ["system", "create_home", "lock", "force_change"],
+            "del": ["home", "group"],
+            "mod": ["lock"],
+            "list": [],
+            "info": []
+        }
+        return boolean_params
+
     def _handle_add(self, username: str, params: Dict[str, str]) -> int:
         """
         添加新用户
@@ -35,12 +51,14 @@ class UserModule(BaseModule):
         Returns:
             执行结果状态码
         """
-        # 检查是否为系统用户
-        is_system = params.get("system", "").lower() in ("true", "yes", "1")
-        
+        # 检查是否为系统用户（使用配置系统）
+        is_system = self._convert_bool(
+            self._get_param_value("system", "add", params, "false")
+        )
+
         # 构建useradd命令
         command = ["sudo", "useradd"]
-        
+
         # 系统用户设置
         if is_system:
             command.append("-r")  # 系统用户
@@ -49,70 +67,77 @@ class UserModule(BaseModule):
             params["shell"] = "/sbin/nologin"
         else:
             command.append("-m")  # 创建家目录
-        
+
         # 设置主目录
         if "home" in params:
             command.extend(["-d", params["home"]])
-        
+
         # 设置chroot目录
         if "chroot" in params:
             command.extend(["-b", params["chroot"]])
-        
+
         # 设置shell（获取系统默认shell）
         if "shell" in params:
             command.extend(["-s", params["shell"]])
         else:
-            # 获取系统默认shell
+            # 获取系统默认shell（使用新的配置键名）
             import os
-            default_shell = os.environ.get("SHELL", "/bin/bash")
+            default_shell = self._get_param_value("shell", "add", params,
+                                                   os.environ.get("SHELL", "/bin/bash"))
             command.extend(["-s", default_shell])
-        
+
         # 设置用户组
         if "group" in params:
             # 解析组列表，第一个组为主组，其余为附加组
             groups_str = params["group"]
             groups = groups_str.split(",")
-            
+
             # 设置主组
             command.extend(["-g", groups[0]])
-            
+
             # 如果有多个组，设置附加组
             if len(groups) > 1:
                 command.extend(["-G", ",".join(groups[1:])])
         else:
             # 默认创建与用户同名的用户组
             command.extend(["-U"])  # 创建与用户同名的用户组
-        
+
         # 设置用户ID
         if "uid" in params:
             command.extend(["-u", params["uid"]])
-        
+
         # 设置用户注释
         if "comment" in params:
             command.extend(["-c", params["comment"]])
-        
+
         # 添加用户名
         command.append(username)
-        
+
         # 执行useradd命令
         result = self._run_command(command)
-        
-        # 设置密码
-        password = params.get("password", "123456")  # 默认密码为123456
-        password_cmd = ["echo", f"{username}:{password}", "|", "sudo", "chpasswd"]
-        result = result or self._run_command(password_cmd, check=False)
-        
-        # 设置首次登录强制修改密码
-        if params.get("force_change", "").lower() in ("true", "yes", "1") or "password" not in params:
+
+        # 设置密码（使用配置系统获取默认密码）
+        password = self._get_param_value("password", "add", params, "123456")
+        password_cmd = f"echo '{username}:{password}' | sudo chpasswd"
+        password_result = self._run_command(["bash", "-c", password_cmd], check=False)
+        result = result or password_result
+
+        # 设置首次登录强制修改密码（使用配置系统）
+        force_change = self._convert_bool(
+            self._get_param_value("force_change", "add", params, "true")
+        )
+        if force_change or "password" not in params:
             # 使用chage命令设置密码过期
             expire_cmd = ["sudo", "chage", "-d", "0", username]
             result = result or self._run_command(expire_cmd)
-        
-        # 锁定用户
-        if params.get("lock", "").lower() in ("true", "yes", "1"):
+
+        # 锁定用户（使用配置系统）
+        if self._convert_bool(
+            self._get_param_value("lock", "add", params, "false")
+        ):
             lock_cmd = ["sudo", "usermod", "-L", username]
             result = result or self._run_command(lock_cmd)
-        
+
         return result
 
     def _handle_del(self, username: str, params: Dict[str, str]) -> int:
@@ -129,20 +154,24 @@ class UserModule(BaseModule):
         # 构建userdel命令
         command = ["sudo", "userdel"]
 
-        # 检查是否删除家目录
-        if params.get("home", "").lower() in ("true", "yes", "1"):
+        # 检查是否删除家目录（使用新的配置键名）
+        if self._convert_bool(
+            self._get_param_value("home", "del", params, "false")
+        ):
             command.append("-r")  # 删除用户主目录和邮件池
 
         command.append(username)
         result = self._run_command(command)
 
-        # 如果用户删除成功且需要删除同名用户组
-        if result == 0 and params.get("group", "").lower() in ("true", "yes", "1"):
+        # 如果用户删除成功且需要删除同名用户组（使用新的配置键名）
+        if result == 0 and self._convert_bool(
+            self._get_param_value("group", "del", params, "false")
+        ):
             # 检查是否存在同名用户组
             group_cmd = ["getent", "group", username]
-            group_result = self._run_command(group_cmd, check=False, output_format="raw")
+            group_result = self._run_command_capture(group_cmd, check=False)
 
-            if group_result == 0 and group_result.stdout:
+            if group_result.returncode == 0 and group_result.stdout:
                 # 删除同名用户组
                 delgroup_cmd = ["sudo", "groupdel", username]
                 result = self._run_command(delgroup_cmd)
@@ -164,9 +193,9 @@ class UserModule(BaseModule):
         if username.isdigit():
             # 使用UID获取用户名
             uid_cmd = ["getent", "passwd", username]
-            uid_result = self._run_command(uid_cmd, check=False, output_format="raw")
+            uid_result = self._run_command_capture(uid_cmd, check=False)
 
-            if uid_result != 0 or not uid_result.stdout:
+            if uid_result.returncode != 0 or not uid_result.stdout:
                 print(f"错误：找不到UID为 {username} 的用户")
                 return 1
 
@@ -212,15 +241,12 @@ class UserModule(BaseModule):
         if "comment" in params:
             command.extend(["-c", params["comment"]])
 
-        # 添加chroot参数
-        if "chroot" in params:
-            command.extend(["-d", params["chroot"]])
-
-        # 添加锁定/解锁参数
+        # 添加锁定/解锁参数（使用配置系统）
         if "lock" in params:
-            if params["lock"].lower() in ("true", "yes", "1"):
+            lock_value = params["lock"]
+            if lock_value.lower() in ("true", "yes", "1"):
                 command.append("-L")
-            elif params["lock"].lower() in ("false", "no", "0"):
+            elif lock_value.lower() in ("false", "no", "0"):
                 command.append("-U")
 
         # 添加密码参数
@@ -235,7 +261,46 @@ class UserModule(BaseModule):
         command.append(username)
 
         # 执行usermod命令
-        return self._run_command(command)
+        result = self._run_command(command)
+
+        # 如果指定了chroot参数，在chroot环境中也执行相同的修改
+        if result == 0 and "chroot" in params:
+            chroot_dir = params["chroot"]
+            # 构建chroot环境中的usermod命令
+            chroot_cmd = ["sudo", "chroot", chroot_dir, "usermod"]
+
+            # 重新构建参数（排除username和chroot）
+            if "home" in params:
+                chroot_cmd.extend(["-d", params["home"], "-m"])
+            if "group" in params:
+                groups = params["group"].split(",")
+                if len(groups) >= 1 and groups[0] != "":
+                    chroot_cmd.extend(["-g", groups[0]])
+                    if len(groups) > 1:
+                        chroot_cmd.extend(["-G", ",".join(groups[1:])])
+                elif len(groups) > 1:
+                    chroot_cmd.extend(["-G", ",".join(groups[1:])])
+            if "shell" in params:
+                chroot_cmd.extend(["-s", params["shell"]])
+            if "uid" in params:
+                chroot_cmd.extend(["-u", params["uid"]])
+            if "uname" in params:
+                chroot_cmd.extend(["-l", params["uname"]])
+            if "comment" in params:
+                chroot_cmd.extend(["-c", params["comment"]])
+            if "lock" in params:
+                lock_value = params["lock"]
+                if lock_value.lower() in ("true", "yes", "1"):
+                    chroot_cmd.append("-L")
+                elif lock_value.lower() in ("false", "no", "0"):
+                    chroot_cmd.append("-U")
+
+            chroot_cmd.append(username)
+            chroot_result = self._run_command(chroot_cmd, check=False)
+            if chroot_result != 0:
+                print(f"警告：无法在chroot环境 {chroot_dir} 中修改用户 {username}")
+
+        return result
 
     def _handle_list(self, value: str, params: Dict[str, str]) -> int:
         """
@@ -248,8 +313,8 @@ class UserModule(BaseModule):
         Returns:
             执行结果状态码
         """
-        # 获取用户类型，默认为login（可登录用户）
-        user_type = value.lower() if value else "login"
+        # 获取用户类型（使用新的配置键名）
+        user_type = value.lower() if value else self._get_param_value("filter", "list", params, "login")
 
         # 使用getent命令列出用户
         command = ["getent", "passwd"]
@@ -369,8 +434,8 @@ class UserModule(BaseModule):
         Returns:
             执行结果状态码
         """
-        # 获取list参数，默认为base
-        list_param = params.get("list", "base").lower()
+        # 获取显示内容参数（使用新的配置键名，默认为base）
+        list_param = self._get_param_value("show", "info", params, "base").lower()
 
         # 获取用户基本信息
         passwd_cmd = ["getent", "passwd", username]

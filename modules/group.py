@@ -25,6 +25,22 @@ class GroupModule(BaseModule):
             "info": "显示用户组详细信息"
         }
 
+    def get_boolean_params(self, action: str = None) -> Dict[str, List[str]]:
+        """
+        获取布尔参数列表
+
+        Returns:
+            布尔参数字典，格式为 {action: [param1, param2, ...]}
+        """
+        boolean_params = {
+            "add": ["system"],
+            "del": ["force"],
+            "mod": [],
+            "list": [],
+            "info": ["members"]
+        }
+        return boolean_params
+
     def _handle_add(self, groupname: str, params: Dict[str, str]) -> int:
         """
         添加新用户组
@@ -36,8 +52,10 @@ class GroupModule(BaseModule):
         Returns:
             执行结果状态码
         """
-        # 检查是否为系统组
-        is_system = params.get("system", "").lower() in ("true", "yes", "1")
+        # 检查是否为系统组（使用配置系统）
+        is_system = self._convert_bool(
+            self._get_param_value("system", "add", params, "false")
+        )
 
         # 构建groupadd命令
         command = ["sudo", "groupadd"]
@@ -49,13 +67,15 @@ class GroupModule(BaseModule):
         # 添加GID参数
         if "gid" in params:
             gid = params["gid"]
-            command.extend(["-g", gid])
 
-            # 检查GID是否已存在
+            # 先检查GID是否已存在
             check_gid_cmd = ["getent", "group", gid]
             check_result = self._run_command_capture(check_gid_cmd, check=False)
             if check_result.returncode == 0 and check_result.stdout:
                 print(f"警告：GID {gid} 已被其他组使用")
+            else:
+                # GID未被占用，添加到命令
+                command.extend(["-g", gid])
 
         command.append(groupname)
         result = self._run_command(command)
@@ -104,8 +124,10 @@ class GroupModule(BaseModule):
         Returns:
             执行结果状态码
         """
-        # 检查是否为强制删除
-        is_force = params.get("force", "").lower() in ("true", "yes", "1")
+        # 检查是否为强制删除（使用配置系统）
+        is_force = self._convert_bool(
+            self._get_param_value("force", "del", params, "false")
+        )
 
         # 如果groupname是数字，则视为GID，需要先获取组名
         if groupname.isdigit():
@@ -264,7 +286,11 @@ class GroupModule(BaseModule):
             current_members = [m for m in current_members if m]  # 过滤掉空字符串
 
             # 检查是否是覆盖模式（不包含+或-符号）
-            if not any(c in user_param for c in ["+", "-"]):
+            # 注意：空字符串或仅包含空格的字符串应被视为无效参数，不执行任何操作
+            user_param_stripped = user_param.strip()
+            if not user_param_stripped:
+                print(f"警告：user参数为空，不会修改组成员")
+            elif not any(c in user_param for c in ["+", "-"]):
                 # 覆盖模式：清空当前成员，设置新成员
                 new_members = [u.strip() for u in user_param.split(",") if u.strip()]
 
@@ -341,14 +367,14 @@ class GroupModule(BaseModule):
         Returns:
             执行结果状态码
         """
-        # 获取列表类型，默认为base
-        list_type = value.lower() if value else "base"
+        # 获取列表类型（使用新的配置键名）
+        list_type = value.lower() if value else self._get_param_value("filter", "list", params, "all")
         if list_type not in ["all", "base"]:
             print(f"警告：不支持的列表类型 '{value}'，将使用默认的base类型")
             list_type = "base"
 
-        # 获取排序方式，默认按gid排序
-        sort_by = params.get("sort", "gid").lower()
+        # 获取排序方式（使用新的配置键名，默认按gid排序）
+        sort_by = self._get_param_value("sort", "list", params, "gid").lower()
         if sort_by not in ["gname", "gid"]:
             print(f"警告：不支持的排序方式 '{sort_by}'，将使用默认的gid排序")
             sort_by = "gid"
@@ -359,6 +385,11 @@ class GroupModule(BaseModule):
 
         if result.returncode != 0:
             return result.returncode
+
+        # 检查stdout是否为空
+        if not result.stdout:
+            print("警告：无法获取用户组信息")
+            return 1
 
         # 解析组信息
         groups = []
@@ -468,8 +499,11 @@ class GroupModule(BaseModule):
         print(f"GID: {gid}")
         print(f"系统组: {is_system}")
 
-        # 如果指定了users参数或组成员不为空，显示成员列表
-        if params.get("users", "").lower() in ("true", "yes", "1") or members:
+        # 如果指定了members参数或组成员不为空，显示成员列表（使用新的配置键名）
+        show_members = self._convert_bool(
+            self._get_param_value("members", "info", params, "false")
+        )
+        if show_members or members:
             print("成员:")
             if members:
                 for member in sorted(members):

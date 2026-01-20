@@ -3,7 +3,9 @@
 """
 
 from typing import Dict
+
 from .base import BaseModule
+
 
 class ProcessModule(BaseModule):
     """进程管理模块"""
@@ -23,6 +25,24 @@ class ProcessModule(BaseModule):
             "nice": "调整进程优先级",
             "limit": "设置进程资源限制"
         }
+
+    def get_boolean_params(self, action: str = None) -> Dict[str, List[str]]:
+        """
+        获取布尔参数列表
+
+        Returns:
+            布尔参数字典，格式为 {action: [param1, param2, ...]}
+        """
+        boolean_params = {
+            "list": [],
+            "kill": ["force"],
+            "tree": [],
+            "search": ["exact"],
+            "info": ["detail"],
+            "nice": [],
+            "limit": []
+        }
+        return boolean_params
 
     def _handle_list(self, value: str, params: Dict[str, str]) -> int:
         """
@@ -69,12 +89,14 @@ class ProcessModule(BaseModule):
         # 构建kill命令
         command = ["kill"]
 
-        # 添加信号参数
-        signal = params.get("signal", "15")  # 默认使用SIGTERM
+        # 添加信号参数（使用配置系统）
+        signal = self._get_param_value("signal", "kill", params, "15")
         command.append(f"-{signal}")
 
-        # 如果指定了force参数且为真，使用SIGKILL信号
-        if params.get("force", "").lower() in ("true", "yes", "1"):
+        # 如果指定了force参数且为真，使用SIGKILL信号（使用配置系统）
+        if self._convert_bool(
+            self._get_param_value("force", "kill", params, "false")
+        ):
             command = ["kill", "-9"]
 
         command.append(pid)
