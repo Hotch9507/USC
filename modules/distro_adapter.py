@@ -3,11 +3,11 @@
 处理不同Linux发行版之间的命令差异
 """
 
-import os
-import platform
-import subprocess
-from typing import Dict, List, Optional, Tuple
 import logging
+import platform
+import re
+import subprocess
+from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,6 @@ class DistroAdapter:
             with open('/etc/redhat-release', 'r') as f:
                 content = f.read()
                 # 提取版本号
-                import re
                 match = re.search(r'(\d+\.?\d*)', content)
                 if match:
                     return match.group(1)

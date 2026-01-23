@@ -2,6 +2,7 @@
 用户管理模块
 """
 
+import os
 from typing import Dict
 
 from .base import BaseModule
@@ -81,7 +82,6 @@ class UserModule(BaseModule):
             command.extend(["-s", params["shell"]])
         else:
             # 获取系统默认shell（使用新的配置键名）
-            import os
             default_shell = self._get_param_value("shell", "add", params,
                                                    os.environ.get("SHELL", "/bin/bash"))
             command.extend(["-s", default_shell])

@@ -2,6 +2,7 @@
 文件管理模块
 """
 
+import os
 from typing import Dict
 
 from .base import BaseModule
@@ -36,8 +37,8 @@ class FileModule(BaseModule):
             布尔参数字典，格式为 {action: [param1, param2, ...]}
         """
         boolean_params = {
-            "copy": ["archive", "recursive", "verbose", "update", "softlink", "force"],
-            "move": ["force"],
+            "copy": ["archive", "recursive", "verbose", "update", "force"],
+            "move": ["recursive", "force", "update", "verbose"],
             "del": ["recursive", "force"],
             "mkdir": ["parents"],
             "cat": ["number", "show_nonprinting"],
@@ -52,36 +53,77 @@ class FileModule(BaseModule):
         """
         复制文件或目录
 
-        Args:
+        参数说明：
             source: 源路径
-                   - 以/结尾：复制目录下的内容
-                   - 不以/结尾：复制目录本身
-            params: 参数字典，必须包含 dest
+                    - 以/*结尾：复制目录下的文件
+                    - 不加/或者加了/但没有*：复制目录本身
+            params: 参数字典
+                - dest: 目标路径（可选，无论有无/都视为目录）
+                       如果为空，默认复制到原始目录并添加_数字序列
+                - recursive: 是否递归复制（默认true）
+                - archive: 归档模式（默认true，这是参数预设集合）
+                         添加 --no-dereference --preserve=mode,ownership,timestamps,links,xattr,context,all --recursive
+                - verbose: 显示复制进度（默认true）
+                - force: 是否强制覆盖（默认false，有同名文件时提示）
+                - update: 只复制更新的文件（默认false）
+                - preserve: 保持信息参数，逗号分割，可选值：
+                           hardlink(硬链接), softlink(软链接), mode(文件权限),
+                           owner(所有者), time(时间戳), exmode(扩展权限), context(SELinux上下文)
 
         Returns:
             执行结果状态码
         """
-        # 检查必填参数
-        if "dest" not in params:
-            print("错误：缺少目标路径参数 'dest'")
-            return 1
+        # 获取dest参数（可以为空）
+        dest = params.get("dest", "")
 
-        dest = params["dest"]
+        # 如果dest为空，默认复制到原始目录并添加_数字序列
+        if not dest:
+            # 提取源路径的父目录
+            if source.endswith("/*"):
+                # 源以/*结尾，表示目录下的文件
+                source_dir = source[:-2]  # 移除 /*
+                parent_dir = os.path.dirname(source_dir)
+                base_name = os.path.basename(source_dir)
+            else:
+                # 源不以/*结尾（不加/或者加了/但没有*），表示目录或文件本身
+                # 统一移除末尾的/（如果有）
+                source_clean = source.rstrip("/")
+                parent_dir = os.path.dirname(source_clean)
+                base_name = os.path.basename(source_clean)
 
-        # 构建cp命令
-        command = ["cp"]
+            # 确定目标路径为父目录
+            dest_dir = parent_dir if parent_dir else "."
+
+            # 查找可用的序列号
+            seq = 1
+            while True:
+                dest_path = os.path.join(dest_dir, f"{base_name}_{seq}")
+                if not os.path.exists(dest_path):
+                    break
+                seq += 1
+
+            dest = dest_path
+
+        # 确保目标路径以/结尾（视为目录）
+        if not dest.endswith("/"):
+            dest = dest + "/"
 
         # 获取archive参数（默认true）
+        # 注意：这是"参数预设集合"，会添加多个参数
         archive = self._convert_bool(
             self._get_param_value("archive", "copy", params, "true")
         )
 
+        # 构建cp命令
+        command = ["cp"]
+
         # 如果archive为true，添加归档模式的参数
         # 注意：这些参数的顺序很重要，会影响后续参数的效果
         if archive:
-            # 归档模式：--no-dereference --preserve=mode,ownership,timestamps,xattr,context --recursive
+            # 归档模式：添加完整参数而非简单的 -a
+            # --no-dereference --preserve=mode,ownership,timestamps,links,xattr,context,all --recursive
             command.append("--no-dereference")
-            command.append("--preserve=mode,ownership,timestamps,xattr,context")
+            command.append("--preserve=mode,ownership,timestamps,links,xattr,context,all")
             command.append("--recursive")
 
         # 获取recursive参数（默认true）
@@ -115,8 +157,8 @@ class FileModule(BaseModule):
         ):
             command.append("--update")
 
-        # 获取preserve参数（可选值：links, mode, owner, time, exmode, context）
-        # 如果指定了preserve参数，添加--preserve
+        # 获取preserve参数（可选值：hardlink, softlink, mode, owner, time, exmode, context）
+        # 如果指定了preserve参数，需要处理
         if "preserve" in params:
             preserve_value = params["preserve"]
             if preserve_value:
@@ -125,7 +167,13 @@ class FileModule(BaseModule):
                     item = item.strip()
                     if item:
                         # 映射用户友好的参数名到cp的实际参数名
-                        if item == "exmode":
+                        if item == "hardlink":
+                            # 硬链接对应-d参数（--dereference-prevents-hardlink）
+                            preserve_items.append("links")
+                        elif item == "softlink":
+                            # 软链接对应--no-dereference
+                            preserve_items.append("links")
+                        elif item == "exmode":
                             # 扩展权限对应xattr
                             preserve_items.append("xattr")
                         elif item == "time":
@@ -139,28 +187,16 @@ class FileModule(BaseModule):
                             preserve_items.append(item)
 
                 if preserve_items:
+                    # 移除archive添加的preserve参数（如果有）
+                    if archive and "--preserve" in " ".join(command):
+                        # 找到并移除archive添加的preserve参数
+                        new_command = []
+                        for cmd in command:
+                            if not cmd.startswith("--preserve="):
+                                new_command.append(cmd)
+                        command = new_command
+
                     command.append(f"--preserve={','.join(preserve_items)}")
-
-        # 获取softlink参数（默认true，保持软链接）
-        softlink = self._convert_bool(
-            self._get_param_value("softlink", "copy", params, "true")
-        )
-
-        # 如果archive模式已经添加了--no-dereference，这里需要处理
-        if archive:
-            # archive模式默认是--no-dereference（保持软链接）
-            # 如果softlink为false，需要改为--dereference
-            if not softlink:
-                # 移除--no-dereference（在位置1）
-                if "--no-dereference" in command:
-                    command.remove("--no-dereference")
-                command.append("--dereference")
-        else:
-            # 非archive模式
-            if softlink:
-                command.append("--no-dereference")
-            else:
-                command.append("--dereference")
 
         # 获取force参数（默认false）
         force = self._convert_bool(
@@ -175,16 +211,7 @@ class FileModule(BaseModule):
             # 注意：cp命令在交互模式下使用-i参数
             command.append("--interactive")
 
-        # 处理源路径和目标路径
-        # 目标地址无论有无/，都视为目录
-        # 源地址：
-        #   - 以/结尾：复制目录下的内容
-        #   - 不以/结尾：复制目录本身
-
-        # 确保目标路径以/结尾（视为目录）
-        if not dest.endswith("/"):
-            dest = dest + "/"
-
+        # 添加源和目标
         command.extend([source, dest])
         return self._run_command(command)
 
@@ -271,29 +298,128 @@ class FileModule(BaseModule):
         """
         移动或重命名文件或目录
 
-        Args:
+        参数说明：
             source: 源路径
-            params: 参数字典，必须包含 dest，可能包含 force 等
+                    - 以/*结尾：移动目录下的文件
+                    - 不加/或者加了/但没有*：移动目录本身
+            params: 参数字典
+                - dest: 目标路径（必需，无论有无/都视为目录）
+                       如果为同目录，则为重命名行为
+                - recursive: 是否递归移动目录下的所有文件（默认true）
+                - force: 是否强制覆盖（默认false，有同名文件时提示）
+                - update: 只移动更新的文件到目标（默认false）
+                - verbose: 显示移动进度（默认true）
 
         Returns:
             执行结果状态码
         """
+        # 检查必填参数
         if "dest" not in params:
             print("错误：缺少目标路径参数 'dest'")
             return 1
 
         dest = params["dest"]
 
+        # 处理源路径：如果以/*结尾，需要移动目录下的文件
+        if source.endswith("/*"):
+            # 移动目录下的所有文件到目标目录
+            source_dir = source[:-2]  # 移除 /*
+            if not os.path.isdir(source_dir):
+                print(f"错误：源目录不存在: {source_dir}")
+                return 1
+
+            # 确保目标路径以/结尾（视为目录）
+            if not dest.endswith("/"):
+                dest = dest + "/"
+
+            # 遍历源目录下的所有项并逐个移动
+            try:
+                entries = os.listdir(source_dir)
+                for entry in entries:
+                    src_path = os.path.join(source_dir, entry)
+                    # 跳过隐藏文件和子目录（如果recursive为false）
+                    if entry.startswith("."):
+                        continue
+
+                    # 检查recursive参数
+                    recursive = self._convert_bool(
+                        self._get_bool_param_value("recursive", "move", params, "true")
+                    )
+
+                    if os.path.isdir(src_path) and not recursive:
+                        # 是目录但不需要递归，跳过
+                        continue
+
+                    # 构建单个文件的移动命令
+                    result = self._move_single_item(src_path, dest, params)
+                    if result != 0:
+                        return result
+
+                return 0
+            except Exception as e:
+                print(f"错误：无法读取源目录: {e}")
+                return 1
+        else:
+            # 移动目录或文件本身（统一移除末尾的/）
+            source_clean = source.rstrip("/")
+            return self._move_single_item(source_clean, dest, params)
+
+    def _move_single_item(self, source: str, dest: str, params: Dict[str, str]) -> int:
+        """
+        移动单个文件或目录
+
+        Args:
+            source: 源路径
+            dest: 目标路径
+            params: 参数字典
+
+        Returns:
+            执行结果状态码
+        """
         # 构建mv命令
         command = ["mv"]
 
-        # 如果指定了force参数且为真，添加-f选项（使用配置系统）
-        if self._convert_bool(
-            self._get_param_value("force", "move", params, "false")
-        ):
-            command.append("-f")
+        # 获取force参数（使用新的布尔参数处理方法，空值默认为true）
+        force = self._convert_bool(
+            self._get_bool_param_value("force", "move", params, "false")
+        )
 
-        command.extend([source, dest])
+        if force:
+            # 强制覆盖，不提示
+            command.append("-f")
+        else:
+            # 不强制，覆盖前提示
+            command.append("-i")
+
+        # 获取update参数（默认false）
+        update = self._convert_bool(
+            self._get_bool_param_value("update", "move", params, "false")
+        )
+
+        if update:
+            # 只移动更新的文件
+            command.append("-u")
+
+        # 获取verbose参数（默认true）
+        verbose = self._convert_bool(
+            self._get_bool_param_value("verbose", "move", params, "true")
+        )
+
+        if verbose:
+            # 显示详细信息
+            command.append("-v")
+
+        # 处理目标路径
+        # 如果目标以/结尾，或者目标是已存在的目录，则移动到目录内
+        # 否则视为重命名
+        target = dest
+        if dest.endswith("/"):
+            target = dest.rstrip("/")
+        elif os.path.isdir(dest):
+            target = dest.rstrip("/")
+
+        # 添加源和目标
+        command.extend([source, target])
         return self._run_command(command)
 
     def _handle_del(self, path: str, params: Dict[str, str]) -> int:
@@ -453,3 +579,178 @@ class FileModule(BaseModule):
 
         command.append(path)
         return self._run_command(command)
+
+    def _help_copy(self) -> Dict:
+        """
+        返回copy操作的详细帮助信息
+
+        Returns:
+            帮助信息字典
+        """
+        return {
+            "module": "file",
+            "action": "copy",
+            "description": "复制文件或目录",
+            "usage": "usc file copy:<source> [dest:<destination>] [parameter:value] [...]",
+            "parameters": {
+                "source": {
+                    "description": "源文件或目录路径",
+                    "required": True,
+                    "notes": "以/*结尾表示复制目录下的文件，不加/或者加了/但没有*表示复制目录本身"
+                },
+                "dest": {
+                    "description": "目标路径（无论有无/都视为目录）",
+                    "required": False,
+                    "default": "复制到原始目录并添加_数字序列",
+                    "notes": "如果为空，则自动在源目录同级创建_数字序列的副本"
+                },
+                "recursive": {
+                    "description": "是否递归复制目录下的所有文件",
+                    "type": "boolean",
+                    "default": "true"
+                },
+                "archive": {
+                    "description": "归档模式（参数预设集合）",
+                    "type": "boolean",
+                    "default": "true",
+                    "notes": "添加 --no-dereference --preserve=mode,ownership,timestamps,links,xattr,context,all --recursive"
+                },
+                "verbose": {
+                    "description": "显示复制进度",
+                    "type": "boolean",
+                    "default": "true"
+                },
+                "force": {
+                    "description": "是否强制覆盖（默认false，有同名文件时提示）",
+                    "type": "boolean",
+                    "default": "false"
+                },
+                "update": {
+                    "description": "只复制更新的文件到目标",
+                    "type": "boolean",
+                    "default": "false"
+                },
+                "preserve": {
+                    "description": "保持信息参数，逗号分割",
+                    "type": "string",
+                    "options": ["hardlink", "softlink", "mode", "owner", "time", "exmode", "context"],
+                    "notes": "hardlink=硬链接, softlink=软链接, mode=文件权限, owner=所有者, time=时间戳, exmode=扩展权限, context=SELinux上下文"
+                }
+            },
+            "examples": [
+                {
+                    "command": "usc file copy:/home/user/data dest:/backup",
+                    "description": "复制目录本身到目标位置（保持所有属性）"
+                },
+                {
+                    "command": "usc file copy:/home/user/data/* dest:/backup",
+                    "description": "复制目录下的所有文件到目标位置"
+                },
+                {
+                    "command": "usc file copy:/home/user/file.txt",
+                    "description": "复制文件到原始目录（自动添加_1后缀）"
+                },
+                {
+                    "command": "usc file copy:/data dest:/backup force:true",
+                    "description": "强制复制目录，覆盖时不提示"
+                },
+                {
+                    "command": "usc file copy:/data dest:/backup preserve:mode,owner,time",
+                    "description": "复制目录，只保持权限、所有者和时间戳"
+                },
+                {
+                    "command": "usc file copy:/data dest:/backup archive:false recursive:false",
+                    "description": "复制目录（不使用归档模式，不递归）"
+                }
+            ],
+            "notes": [
+                "archive参数是'参数预设集合'，会添加多个cp参数，而非简单的-a选项",
+                "archive和recursive的参数顺序很重要：archive先添加--recursive，recursive:false可以覆盖它",
+                "dest为空时会自动生成_数字序列的副本名称"
+            ]
+        }
+
+    def _help_move(self) -> Dict:
+        """
+        返回move操作的详细帮助信息
+
+        Returns:
+            帮助信息字典
+        """
+        return {
+            "module": "file",
+            "action": "move",
+            "description": "移动或重命名文件或目录",
+            "usage": "usc file move:<source> dest:<target> [parameter:value] [...]",
+            "parameters": {
+                "source": {
+                    "description": "源文件或目录路径",
+                    "required": True,
+                    "notes": "以/*结尾表示移动目录下的文件，不加/或者加了/但没有*表示移动目录本身"
+                },
+                "dest": {
+                    "description": "目标路径（必需）",
+                    "required": True,
+                    "notes": "无论有无/都视为目录；如果为同目录，则为重命名行为"
+                },
+                "recursive": {
+                    "description": "是否递归移动目录下的所有文件",
+                    "type": "boolean",
+                    "default": "true"
+                },
+                "force": {
+                    "description": "是否强制覆盖（默认false，有同名文件时提示）",
+                    "type": "boolean",
+                    "default": "false",
+                    "notes": "只指定参数名不加值（如force:）默认为true"
+                },
+                "update": {
+                    "description": "只移动更新的文件到目标",
+                    "type": "boolean",
+                    "default": "false",
+                    "notes": "只指定参数名不加值（如update:）默认为true"
+                },
+                "verbose": {
+                    "description": "显示移动进度",
+                    "type": "boolean",
+                    "default": "true",
+                    "notes": "只指定参数名不加值（如verbose:）默认为true"
+                }
+            },
+            "examples": [
+                {
+                    "command": "usc file move:/home/user/file.txt dest:/backup",
+                    "description": "移动文件到目标目录"
+                },
+                {
+                    "command": "usc file move:/home/user/file.txt dest:/home/user/newname.txt",
+                    "description": "重命名文件（同目录下移动）"
+                },
+                {
+                    "command": "usc file move:/home/user/data dest:/backup",
+                    "description": "移动目录到目标位置"
+                },
+                {
+                    "command": "usc file move:/home/user/data/* dest:/backup",
+                    "description": "移动目录下的所有文件到目标位置"
+                },
+                {
+                    "command": "usc file move:/data dest:/backup force:",
+                    "description": "强制移动，覆盖时不提示（force: 等同于 force:true）"
+                },
+                {
+                    "command": "usc file move:/data dest:/backup update:",
+                    "description": "只移动更新的文件（update: 等同于 update:true）"
+                },
+                {
+                    "command": "usc file move:/src dest:/backup recursive:false",
+                    "description": "移动目录但不递归移动子目录"
+                }
+            ],
+            "notes": [
+                "移动和重命名本质上是相同的操作，mv命令统一处理这两种情况",
+                "布尔参数如果只指定参数名不加值（如force:），默认为true",
+                "源路径以/*结尾时，会遍历目录下所有项逐个移动",
+                "重命名就是同目录下的移动操作"
+            ]
+        }

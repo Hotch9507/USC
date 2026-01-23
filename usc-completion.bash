@@ -70,6 +70,17 @@ _usc_completion() {
                         # 用户名补全
                         COMPREPLY=($(compgen -u -- "$param_value"))
                         ;;
+                    preserve)
+                        # preserve参数选项补全（主要用于file copy命令）
+                        local preserve_opts="hardlink softlink mode owner time exmode context"
+                        # 如果当前值包含逗号，提供下一个选项
+                        if [[ "$param_value" == *,* ]]; then
+                            local last_part="${param_value##*,}"
+                            COMPREPLY=($(compgen -W "$preserve_opts" -- "$last_part"))
+                        else
+                            COMPREPLY=($(compgen -W "$preserve_opts" -- "$param_value"))
+                        fi
+                        ;;
                     *)
                         # 默认不提供补全
                         ;;

@@ -3,6 +3,7 @@ USC基础模块类
 所有具体模块都应继承此类
 """
 
+import datetime
 import logging
 import os
 import subprocess
@@ -216,7 +217,6 @@ class BaseModule(ABC, TomlOutputMixin):
         Returns:
             格式化的时间字符串
         """
-        import datetime
         return datetime.datetime.now().strftime("%Y%m%d%H%M%S")
 
     def _load_config(self):
@@ -317,6 +317,45 @@ class BaseModule(ABC, TomlOutputMixin):
         if isinstance(value, (int, float)):
             return bool(value)
         return default
+
+    def _get_bool_param_value(self, key: str, action: str = None,
+                              params: Dict[str, str] = None, fallback: Any = None) -> Any:
+        """
+        获取布尔参数值，支持空值默认为 true
+
+        如果参数存在于 params 中但值为空字符串，则返回 "true"
+        否则按照原有的优先级规则返回值
+
+        Args:
+            key: 参数名
+            action: 操作名
+            params: 命令行参数字典
+            fallback: 代码默认值
+
+        Returns:
+            参数值
+        """
+        # 第一优先级：命令行参数
+        if params and key in params:
+            value = params[key]
+            # 如果参数值为空字符串，默认为 true
+            if value == "":
+                return "true"
+            return value
+
+        # 第二优先级：操作级配置
+        if action:
+            action_config = self.config.get('default', {}).get(action, {})
+            if key in action_config:
+                return action_config[key]
+
+        # 第三优先级：全局配置
+        global_config = self.config.get('default', {})
+        if key in global_config and not isinstance(global_config[key], dict):
+            return global_config[key]
+
+        # 第四优先级：代码默认值
+        return fallback
 
     def _convert_list(self, value: Any, separator: str = ",") -> List[str]:
         """
